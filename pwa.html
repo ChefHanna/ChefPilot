@@ -86,28 +86,35 @@
     statusEl.textContent = "Lien incomplet (token/emp manquants).";
     sendBtn.disabled = true;
   }else{
-    // 1) Récupère les produits depuis Apps Script (bootstrap déjà fait côté desktop)
     loadGrid().catch(err=>{
       console.error(err);
       statusEl.textContent = "Erreur de chargement.";
     });
   }
 
+  // === CHANGEMENT PRINCIPAL: on utilise action=items (+ cache-buster) ===
   async function loadGrid(){
     statusEl.textContent = "Chargement des produits…";
-    const url = APPS_SCRIPT_BASE + "?action=poll&token="+encodeURIComponent(token);
+    const url = APPS_SCRIPT_BASE + "?action=items&token="+encodeURIComponent(token)+"&_="+Date.now();
     const r = await fetch(url, {method:"GET", headers:{ "Accept":"application/json" }});
     if(!r.ok){ throw new Error("HTTP "+r.status); }
-    const data = await r.json(); // attendu: { ok:true, status:"pending", items:[{Produit,Format,Prix},...] }
+    const data = await r.json(); // attendu: { ok:true, status:"pending|expired", items:[...] }
+    console.log("ITEMS RES =", data);
+
     if(!data || data.ok===false){
-      statusEl.textContent = "Session invalide ou expirée.";
+      statusEl.textContent = "Session invalide.";
       sendBtn.disabled = true;
       return;
     }
-    // Items à afficher
-    const items = data.items || [];
+    // Normalisation des clés (Produit/Format/Prix ou name/unit/price)
+    const items = (data.items || []).map(x => ({
+      Produit: x.Produit ?? x.name ?? "",
+      Format:  x.Format  ?? x.unit ?? "",
+      Prix:    x.Prix    ?? x.price ?? ""
+    }));
+
     renderRows(items);
-    statusEl.textContent = items.length ? "Prêt" : "Aucun produit à afficher.";
+    statusEl.textContent = items.length ? `Prêt${data.status ? " ("+data.status+")" : ""}` : "Aucun produit à afficher.";
   }
 
   function renderRows(items){
@@ -134,6 +141,7 @@
       inp.min = "0";
       inp.className = "qty";
       inp.placeholder = "0";
+      // on garde le produit pour le submit
       inp.dataset.produit = it.Produit || "";
       tdQty.appendChild(inp);
       tr.appendChild(tdQty);
@@ -158,10 +166,6 @@
         if(!isFinite(n) || n < 0) return;
         entries.push({ Produit: inp.dataset.produit, Quantite: String(n) });
       });
-
-      // Autoriser l’envoi même si tout est vide (ça valide la fin de session côté serveur),
-      // mais c’est toi qui décides. Si tu préfères forcer au moins 1 valeur :
-      // if(!entries.length){ msgEl.textContent="Saisis au moins une quantité."; sendBtn.disabled=false; statusEl.textContent="Prêt"; return; }
 
       const payload = { token, emp, entries };
       const r = await fetch(APPS_SCRIPT_BASE+"?action=submit", {
