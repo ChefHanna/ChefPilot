@@ -1,116 +1,189 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chef Pilot - Inventaire Mobile</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inventaire - Chef Pilot</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #f7f7f7;
-      color: #333;
-    }
-    header {
-      background: #cd160f;
-      color: white;
-      text-align: center;
-      padding: 14px;
-      font-size: 20px;
-      font-weight: bold;
-    }
-    main {
-      padding: 16px;
-    }
-    h2 {
-      margin-top: 0;
-    }
-    .produit {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px;
-      margin: 8px 0;
-      background: white;
-      border-radius: 6px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .produit input {
-      width: 70px;
-      padding: 4px;
-      font-size: 14px;
-    }
-    button {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      margin-top: 20px;
-      background: #cd160f;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    button:active {
-      background: #a3120a;
-    }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;margin:0;background:#fafafa;color:#111}
+    header{background:#c41610;color:#fff;padding:14px 18px;font-weight:700;text-align:center}
+    .wrap{max-width:980px;margin:18px auto;padding:0 12px}
+    .card{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px}
+    .topline{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap}
+    .emp{font-weight:700}
+    .status{font-size:14px;opacity:.8}
+    table{width:100%;border-collapse:collapse;margin-top:6px}
+    th,td{border:1px solid #e6e6e6;padding:10px}
+    th{background:#000;color:#fff;text-align:center}
+    td:first-child{text-align:left}
+    td:not(:first-child){text-align:center}
+    input.qty{width:110px;padding:8px;border:1px solid #d0d0d0;border-radius:8px;text-align:center}
+    .btn{appearance:none;border:0;border-radius:10px;padding:12px 16px;font-weight:700;cursor:pointer}
+    .btn-primary{background:#c41610;color:#fff}
+    .btn-primary:disabled{opacity:.5;cursor:not-allowed}
+    .footer{margin-top:14px;display:flex;gap:12px;justify-content:flex-end;align-items:center}
+    .msg{font-size:14px}
   </style>
 </head>
 <body>
   <header>Inventaire - Chef Pilot</header>
-  <main>
-    <h2 id="emp"></h2>
-    <div id="liste"></div>
-    <button onclick="envoyer()">Envoyer les quantités</button>
-  </main>
+  <div class="wrap">
+    <div class="card">
+      <div class="topline">
+        <div class="emp">Emplacement : <span id="empName">–</span></div>
+        <div class="status" id="status">Chargement…</div>
+      </div>
+
+      <div style="overflow-x:auto">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th style="text-align:left">Produit</th>
+              <th>Format</th>
+              <th>Prix</th>
+              <th>Quantité</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <!-- lignes injectées -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="footer">
+        <span class="msg" id="msg"></span>
+        <button id="sendBtn" class="btn btn-primary">Envoyer les quantités</button>
+      </div>
+    </div>
+  </div>
 
   <script>
-    const API = "https://script.google.com/macros/s/AKfycby-HKEw-pf8l3Bgnf_YJzTNNbSMwn5bbUNYGc_TJUKcpl_U73-COrPB9y8nBPRHGsP8HQ/exec";
+  // === CONFIG: ton Apps Script /exec (le même que dans ton logiciel) ===
+  const APPS_SCRIPT_BASE = "https://script.google.com/macros/s/AKfycby-HKEw-pf8l3Bgnf_YJzTNNbSMwn5bbUNYGc_TJUKcpl_U73-COrPB9y8nBPRHGsP8HQ/exec";
 
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
-    const emp = params.get("emp");
+  // Helpers
+  function qs(key){
+    const u=new URL(location.href);
+    return u.searchParams.get(key)||"";
+  }
+  function fmtPrix(v){
+    if(v===null||v===undefined||v==="") return "";
+    const n=Number(v);
+    return isFinite(n) ? "$"+n.toFixed(2) : String(v);
+  }
 
-    document.getElementById("emp").textContent = emp ? "Emplacement : " + emp : "";
+  const token = qs("token");
+  const emp   = qs("emp");
+  const empEl = document.getElementById("empName");
+  const tbody = document.getElementById("tbody");
+  const statusEl = document.getElementById("status");
+  const msgEl = document.getElementById("msg");
+  const sendBtn = document.getElementById("sendBtn");
 
-    async function charger() {
-      const r = await fetch(API + "?action=poll&token=" + token);
-      const data = await r.json();
-      if (data && data.items) {
-        const liste = document.getElementById("liste");
-        liste.innerHTML = "";
-        data.items.forEach(p => {
-          const div = document.createElement("div");
-          div.className = "produit";
-          div.innerHTML = `
-            <span>${p.Produit} (${p.Format})</span>
-            <input type="number" step="0.001" placeholder="Qté">
-          `;
-          liste.appendChild(div);
-        });
-      }
+  empEl.textContent = emp || "–";
+
+  if(!token || !emp){
+    statusEl.textContent = "Lien incomplet (token/emp manquants).";
+    sendBtn.disabled = true;
+  }else{
+    // 1) Récupère les produits depuis Apps Script (bootstrap déjà fait côté desktop)
+    loadGrid().catch(err=>{
+      console.error(err);
+      statusEl.textContent = "Erreur de chargement.";
+    });
+  }
+
+  async function loadGrid(){
+    statusEl.textContent = "Chargement des produits…";
+    const url = APPS_SCRIPT_BASE + "?action=poll&token="+encodeURIComponent(token);
+    const r = await fetch(url, {method:"GET", headers:{ "Accept":"application/json" }});
+    if(!r.ok){ throw new Error("HTTP "+r.status); }
+    const data = await r.json(); // attendu: { ok:true, status:"pending", items:[{Produit,Format,Prix},...] }
+    if(!data || data.ok===false){
+      statusEl.textContent = "Session invalide ou expirée.";
+      sendBtn.disabled = true;
+      return;
     }
+    // Items à afficher
+    const items = data.items || [];
+    renderRows(items);
+    statusEl.textContent = items.length ? "Prêt" : "Aucun produit à afficher.";
+  }
 
-    async function envoyer() {
-      const divs = document.querySelectorAll(".produit");
+  function renderRows(items){
+    tbody.innerHTML = "";
+    for(const it of items){
+      const tr = document.createElement("tr");
+
+      const tdProd = document.createElement("td");
+      tdProd.textContent = it.Produit || "";
+      tr.appendChild(tdProd);
+
+      const tdFmt = document.createElement("td");
+      tdFmt.textContent = it.Format || "";
+      tr.appendChild(tdFmt);
+
+      const tdPrix = document.createElement("td");
+      tdPrix.textContent = fmtPrix(it.Prix);
+      tr.appendChild(tdPrix);
+
+      const tdQty = document.createElement("td");
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.step = "0.001";
+      inp.min = "0";
+      inp.className = "qty";
+      inp.placeholder = "0";
+      inp.dataset.produit = it.Produit || "";
+      tdQty.appendChild(inp);
+      tr.appendChild(tdQty);
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  sendBtn.addEventListener("click", async ()=>{
+    try{
+      msgEl.textContent = "";
+      sendBtn.disabled = true;
+      statusEl.textContent = "Envoi en cours…";
+
+      // Collecte des entrées non vides
       const entries = [];
-      divs.forEach(d => {
-        const nom = d.querySelector("span").textContent.split(" (")[0];
-        const qte = d.querySelector("input").value;
-        if (qte !== "") {
-          entries.push({Produit: nom, Quantite: qte});
-        }
+      document.querySelectorAll("input.qty").forEach(inp=>{
+        const raw = (inp.value||"").trim();
+        if(!raw) return;
+        const q = raw.replace(",", ".");
+        const n = Number(q);
+        if(!isFinite(n) || n < 0) return;
+        entries.push({ Produit: inp.dataset.produit, Quantite: String(n) });
       });
-      await fetch(API + "?action=submit&token=" + token, {
-        method: "POST",
-        body: JSON.stringify(entries),
-      });
-      alert("Inventaire envoyé ✅");
-    }
 
-    charger();
+      // Autoriser l’envoi même si tout est vide (ça valide la fin de session côté serveur),
+      // mais c’est toi qui décides. Si tu préfères forcer au moins 1 valeur :
+      // if(!entries.length){ msgEl.textContent="Saisis au moins une quantité."; sendBtn.disabled=false; statusEl.textContent="Prêt"; return; }
+
+      const payload = { token, emp, entries };
+      const r = await fetch(APPS_SCRIPT_BASE+"?action=submit", {
+        method:"POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload),
+      });
+      if(!r.ok){ throw new Error("HTTP "+r.status); }
+      const data = await r.json(); // attendu: { ok:true }
+      if(data && data.ok){
+        statusEl.textContent = "Quantités envoyées ✅";
+        msgEl.textContent = "Vous pouvez fermer cette page.";
+      }else{
+        throw new Error(data && data.error || "Réponse invalide");
+      }
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = "Échec d’envoi.";
+      msgEl.textContent = String(err);
+      sendBtn.disabled = false;
+    }
+  });
   </script>
 </body>
 </html>
