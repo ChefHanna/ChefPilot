@@ -56,15 +56,25 @@
   </div>
 
   <script>
-  // === CONFIG: ton Apps Script /exec ===
+  // === CONFIG : URL /exec de ton Apps Script ===
   const APPS_SCRIPT_BASE = "https://script.google.com/macros/s/AKfycby-HKEw-pf8l3Bgnf_YJzTNNbSMwn5bbUNYGc_TJUKcpl_U73-COrPB9y8nBPRHGsP8HQ/exec";
 
   // Helpers
   const qs = (k)=> new URL(location.href).searchParams.get(k) || "";
-  const fmtPrix = (v)=>{
-    if(v===null||v===undefined||v==="") return "";
-    const n=Number(v); return isFinite(n) ? "$"+n.toFixed(2) : String(v);
-  };
+  const fmtPrix = (v)=> (v===null||v===undefined||v==="") ? "" : (isFinite(+v) ? "$"+(+v).toFixed(2) : String(v));
+
+  // Normalisation & clé canonique (côté PWA aussi)
+  function normText(s){
+    return (s ?? "")
+      .replace(/\u00A0|\u202F/g, " ")   // NBSP/NNBSP -> espace
+      .normalize("NFKC")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  function makeKey(s){
+    const t = normText(s).toLowerCase();
+    return t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
 
   const token = qs("token");
   const emp   = qs("emp");
@@ -86,26 +96,27 @@
     });
   }
 
-  // --- CHARGEMENT via action=items (avec cache-buster) ---
+  // --- CHARGEMENT via action=items (+ cache-buster) ---
   async function loadGrid(){
     statusEl.textContent = "Chargement des produits…";
     const url = APPS_SCRIPT_BASE + "?action=items&token="+encodeURIComponent(token)+"&_="+Date.now();
     const r = await fetch(url, {method:"GET", headers:{ "Accept":"application/json" }});
     if(!r.ok){ throw new Error("HTTP "+r.status); }
     const data = await r.json();
-    console.log("ITEMS RES =", data);
 
     if(!data || data.ok===false){
       statusEl.textContent = "Session invalide.";
       sendBtn.disabled = true;
       return;
     }
-    // Normalisation + TRIM (évite les espaces parasites p.ex. 'Amélanche ')
-    const items = (data.items || []).map(x => ({
-      Produit: (x.Produit ?? x.name ?? "").trim(),
-      Format:  (x.Format  ?? x.unit ?? "").trim(),
-      Prix:    x.Prix ?? x.price ?? ""
-    }));
+    // Normalisation + Key
+    const items = (data.items || []).map(x => {
+      const Produit = normText(x.Produit ?? x.name ?? "");
+      const Format  = normText(x.Format  ?? x.unit ?? "");
+      const Prix    = x.Prix ?? x.price ?? "";
+      const Key     = x.Key ?? makeKey(Produit);
+      return { Produit, Format, Prix, Key };
+    });
 
     renderRows(items);
     statusEl.textContent = items.length ? "Prêt à saisir" : "Aucun produit à afficher.";
@@ -116,26 +127,16 @@
     for(const it of items){
       const tr = document.createElement("tr");
 
-      const tdProd = document.createElement("td");
-      tdProd.textContent = it.Produit || "";
-      tr.appendChild(tdProd);
-
-      const tdFmt = document.createElement("td");
-      tdFmt.textContent = it.Format || "";
-      tr.appendChild(tdFmt);
-
-      const tdPrix = document.createElement("td");
-      tdPrix.textContent = fmtPrix(it.Prix);
-      tr.appendChild(tdPrix);
+      const tdProd = document.createElement("td"); tdProd.textContent = it.Produit; tr.appendChild(tdProd);
+      const tdFmt  = document.createElement("td"); tdFmt.textContent  = it.Format;  tr.appendChild(tdFmt);
+      const tdPrix = document.createElement("td"); tdPrix.textContent = fmtPrix(it.Prix); tr.appendChild(tdPrix);
 
       const tdQty = document.createElement("td");
       const inp = document.createElement("input");
-      inp.type = "number";
-      inp.step = "0.001";
-      inp.min = "0";
-      inp.className = "qty";
-      inp.placeholder = "0";
-      inp.dataset.produit = (it.Produit || "").trim(); // utilisé au submit
+      inp.type = "number"; inp.step = "0.001"; inp.min = "0";
+      inp.className = "qty"; inp.placeholder = "0";
+      inp.dataset.produit = it.Produit;
+      inp.dataset.key = it.Key;                 // clé canonique
       tdQty.appendChild(inp);
       tr.appendChild(tdQty);
 
@@ -154,10 +155,11 @@
       document.querySelectorAll("input.qty").forEach(inp=>{
         const raw = (inp.value||"").trim();
         if(!raw) return;
-        const q = raw.replace(",", ".");
-        const n = Number(q);
+        const n = Number(raw.replace(",", "."));
         if(!isFinite(n) || n < 0) return;
-        entries.push({ Produit: (inp.dataset.produit || "").trim(), Quantite: String(n) });
+        const produit = normText(inp.dataset.produit);
+        const key     = inp.dataset.key || makeKey(produit);
+        entries.push({ Produit: produit, Key: key, Quantite: String(n) });
       });
 
       const payload = { token, emp, entries };
