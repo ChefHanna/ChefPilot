@@ -44,9 +44,7 @@
               <th>Quantité</th>
             </tr>
           </thead>
-          <tbody id="tbody">
-            <!-- lignes injectées -->
-          </tbody>
+          <tbody id="tbody"></tbody>
         </table>
       </div>
 
@@ -58,19 +56,15 @@
   </div>
 
   <script>
-  // === CONFIG: ton Apps Script /exec (le même que dans ton logiciel) ===
+  // === CONFIG: ton Apps Script /exec ===
   const APPS_SCRIPT_BASE = "https://script.google.com/macros/s/AKfycby-HKEw-pf8l3Bgnf_YJzTNNbSMwn5bbUNYGc_TJUKcpl_U73-COrPB9y8nBPRHGsP8HQ/exec";
 
   // Helpers
-  function qs(key){
-    const u=new URL(location.href);
-    return u.searchParams.get(key)||"";
-  }
-  function fmtPrix(v){
+  const qs = (k)=> new URL(location.href).searchParams.get(k) || "";
+  const fmtPrix = (v)=>{
     if(v===null||v===undefined||v==="") return "";
-    const n=Number(v);
-    return isFinite(n) ? "$"+n.toFixed(2) : String(v);
-  }
+    const n=Number(v); return isFinite(n) ? "$"+n.toFixed(2) : String(v);
+  };
 
   const token = qs("token");
   const emp   = qs("emp");
@@ -92,13 +86,13 @@
     });
   }
 
-  // On charge désormais via action=items (et on ajoute un cache-buster &_=)
+  // --- CHARGEMENT via action=items (avec cache-buster) ---
   async function loadGrid(){
     statusEl.textContent = "Chargement des produits…";
     const url = APPS_SCRIPT_BASE + "?action=items&token="+encodeURIComponent(token)+"&_="+Date.now();
     const r = await fetch(url, {method:"GET", headers:{ "Accept":"application/json" }});
     if(!r.ok){ throw new Error("HTTP "+r.status); }
-    const data = await r.json(); // { ok:true, status:"pending|expired", items:[...] }
+    const data = await r.json();
     console.log("ITEMS RES =", data);
 
     if(!data || data.ok===false){
@@ -106,11 +100,11 @@
       sendBtn.disabled = true;
       return;
     }
-    // Normalisation des clés (Produit/Format/Prix ou name/unit/price)
+    // Normalisation + TRIM (empêche les espaces parasites type 'Amélanche ')
     const items = (data.items || []).map(x => ({
-      Produit: x.Produit ?? x.name ?? "",
-      Format:  x.Format  ?? x.unit ?? "",
-      Prix:    x.Prix    ?? x.price ?? ""
+      Produit: (x.Produit ?? x.name ?? "").trim(),
+      Format:  (x.Format  ?? x.unit ?? "").trim(),
+      Prix:    x.Prix ?? x.price ?? ""
     }));
 
     renderRows(items);
@@ -141,21 +135,21 @@
       inp.min = "0";
       inp.className = "qty";
       inp.placeholder = "0";
-      // on garde le produit pour le submit
-      inp.dataset.produit = it.Produit || "";
-      tbody.appendChild(tr);
+      inp.dataset.produit = (it.Produit || "").trim(); // TRIM ici aussi
       tdQty.appendChild(inp);
       tr.appendChild(tdQty);
+
+      tbody.appendChild(tr);
     }
   }
 
+  // --- ENVOI des quantités ---
   sendBtn.addEventListener("click", async ()=>{
     try{
       msgEl.textContent = "";
       sendBtn.disabled = true;
       statusEl.textContent = "Envoi en cours…";
 
-      // Collecte des entrées non vides
       const entries = [];
       document.querySelectorAll("input.qty").forEach(inp=>{
         const raw = (inp.value||"").trim();
@@ -163,20 +157,17 @@
         const q = raw.replace(",", ".");
         const n = Number(q);
         if(!isFinite(n) || n < 0) return;
-        entries.push({ Produit: inp.dataset.produit, Quantite: String(n) });
+        entries.push({ Produit: (inp.dataset.produit || "").trim(), Quantite: String(n) });
       });
 
       const payload = { token, emp, entries };
-
-      // ====== CORRECTION CORS : pas d'en-tête JSON => pas de préflight ======
       const r = await fetch(APPS_SCRIPT_BASE+"?action=submit", {
         method:"POST",
-        body: JSON.stringify(payload) // envoyé en text/plain par défaut
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload),
       });
-      // =====================================================================
-
       if(!r.ok){ throw new Error("HTTP "+r.status); }
-      const data = await r.json(); // attendu: { ok:true }
+      const data = await r.json();
       if(data && data.ok){
         statusEl.textContent = "Quantités envoyées ✅";
         msgEl.textContent = "Vous pouvez fermer cette page.";
@@ -193,3 +184,4 @@
   </script>
 </body>
 </html>
+
