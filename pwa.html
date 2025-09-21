@@ -92,13 +92,13 @@
     });
   }
 
-  // === CHANGEMENT PRINCIPAL: on utilise action=items (+ cache-buster) ===
+  // On charge désormais via action=items (et on ajoute un cache-buster &_=)
   async function loadGrid(){
     statusEl.textContent = "Chargement des produits…";
     const url = APPS_SCRIPT_BASE + "?action=items&token="+encodeURIComponent(token)+"&_="+Date.now();
     const r = await fetch(url, {method:"GET", headers:{ "Accept":"application/json" }});
     if(!r.ok){ throw new Error("HTTP "+r.status); }
-    const data = await r.json(); // attendu: { ok:true, status:"pending|expired", items:[...] }
+    const data = await r.json(); // { ok:true, status:"pending|expired", items:[...] }
     console.log("ITEMS RES =", data);
 
     if(!data || data.ok===false){
@@ -114,7 +114,7 @@
     }));
 
     renderRows(items);
-    statusEl.textContent = items.length ? `Prêt${data.status ? " ("+data.status+")" : ""}` : "Aucun produit à afficher.";
+    statusEl.textContent = items.length ? "Prêt à saisir" : "Aucun produit à afficher.";
   }
 
   function renderRows(items){
@@ -143,10 +143,9 @@
       inp.placeholder = "0";
       // on garde le produit pour le submit
       inp.dataset.produit = it.Produit || "";
+      tbody.appendChild(tr);
       tdQty.appendChild(inp);
       tr.appendChild(tdQty);
-
-      tbody.appendChild(tr);
     }
   }
 
@@ -168,11 +167,14 @@
       });
 
       const payload = { token, emp, entries };
+
+      // ====== CORRECTION CORS : pas d'en-tête JSON => pas de préflight ======
       const r = await fetch(APPS_SCRIPT_BASE+"?action=submit", {
         method:"POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload) // envoyé en text/plain par défaut
       });
+      // =====================================================================
+
       if(!r.ok){ throw new Error("HTTP "+r.status); }
       const data = await r.json(); // attendu: { ok:true }
       if(data && data.ok){
